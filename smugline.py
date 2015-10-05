@@ -79,6 +79,7 @@ class SmugLine(object):
             app_name="SmugLine")
         self.login()
         self.md5_sums = {}
+        self.filenames = {}
 
     def get_filter(self, media_type='images'):
         if media_type == 'videos':
@@ -146,6 +147,7 @@ class SmugLine(object):
 
     def _upload(self, images, album_name, album):
         images = self._remove_duplicates(images, album)
+
         for image in images:
             print('uploading {0} -> {1}'.format(image, album_name))
             self.upload_file(album, image)
@@ -161,13 +163,19 @@ class SmugLine(object):
             AlbumID=album['id'],
             AlbumKey=album['Key'],
             Extras=extras)
+            # Heavy=True,
         return remote_images
 
     def _get_md5_hashes_for_album(self, album):
-        remote_images = self._get_remote_images(album, 'MD5Sum')
-        md5_sums = [x['MD5Sum'] for x in remote_images['Album']['Images']]
+        remote_images = self._get_remote_images(album, 'MD5Sum,FileName')
+
+        md5_sums = [x.get('MD5Sum', '') for x in remote_images['Album']['Images']]
+        filenames = [x.get('FileName', '') for x in remote_images['Album']['Images']]
+
         self.md5_sums[album['id']] = md5_sums
-        return md5_sums
+        self.filenames[album['id']] = filenames
+
+        return md5_sums, filenames
 
     def _get_images_for_album(self, album, file_filter=IMG_FILTER):
         extras = 'FileName,OriginalURL'
@@ -187,9 +195,12 @@ class SmugLine(object):
             md5.update(data)
         return md5.hexdigest()
 
-    def _include_file(self, f, md5_sums):
+    def _include_file(self, f, md5_sums, filenames):
         try:
             if self._file_md5(f) in md5_sums:
+                print('skipping {0} (duplicate)'.format(f))
+                return False
+            elif os.path.basename(f) in filenames:
                 print('skipping {0} (duplicate)'.format(f))
                 return False
             return True
@@ -199,8 +210,8 @@ class SmugLine(object):
             return False
 
     def _remove_duplicates(self, images, album):
-        md5_sums = self._get_md5_hashes_for_album(album)
-        return [x for x in images if self._include_file(x.get('File'), md5_sums)]
+        md5_sums, filenames = self._get_md5_hashes_for_album(album)
+        return [x for x in images if self._include_file(x.get('File'), md5_sums, filenames)]
 
     def get_albums(self):
         albums = self.smugmug.albums_get(NickName=self.nickname)
